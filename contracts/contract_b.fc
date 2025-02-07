@@ -23,8 +23,6 @@ global slice contract_a_address;
         .end_cell());
 }
 
-int equal_slice_bits (slice a, slice b) asm "SDEQ";
-
 cell calculate_item_state_init(int item_index) {
     cell data = begin_cell()
         .store_uint(item_index, 64)
@@ -50,13 +48,13 @@ slice calculate_item_address(cell state_init) {
 ;; Forwards any message received from an item contract to the main contract with security checks
 () conveyToA(slice sender_address, slice msg_body, int query_id) impure inline {
     ;; parse the message body
-    var (index, method, data) = (msg_body~load_uint(50), msg_body~load_uint(32), msg_body~load_ref());
+    var (index, method, data) = (msg_body~load_uint(64), msg_body~load_uint(32), msg_body~load_ref());
     ;; Ensure the provided index is within the known range. This prevents any deployment with a higher index than expected.
     throw_unless(error::wrong_item_index, next_index > index);
     ;; Re-calculate the expected address for the item contract based on its index and code
     slice item_address = calculate_item_address( calculate_item_state_init(index));
     ;; Verify that the sender's address matches the expected item address
-    throw_unless(error::wrong_sender, equal_slice_bits(sender_address, item_address));
+    throw_unless(error::wrong_sender, equal_slices_bits(sender_address, item_address));
     ;; Send the message to the A contract
     send_raw_message(begin_cell()
         .store_uint(0x18, 6)
@@ -76,9 +74,9 @@ slice calculate_item_address(cell state_init) {
 ;; Forwards a message from the main contract to an item contract based on its index
 () conveyToC(slice sender_address, slice msg_body, int query_id) impure inline {
     ;; parse the message body
-    var (index, method, data) = (msg_body~load_uint(50), msg_body~load_uint(32), msg_body~load_ref());
+    var (index, method, data) = (msg_body~load_uint(64), msg_body~load_uint(32), msg_body~load_ref());
     ;; Ensure the message originated from the main contract
-    throw_unless(error::wrong_sender, equal_slice_bits(contract_a_address, sender_address));
+    throw_unless(error::wrong_sender, equal_slices_bits(contract_a_address, sender_address));
     ;; Validate that the index is within the known range
     throw_unless(error::wrong_item_index, next_index > index);
     ;; Compute the expected address for the item contract
@@ -112,36 +110,61 @@ slice calculate_item_address(cell state_init) {
     }
     slice sender_address = cs~load_msg_addr();
 
-    load_data(); ;; here we populate the storage variables
-
     int op = in_msg_body~load_uint(32);
     int query_id = in_msg_body~load_uint(64);
 
-    ;; deploy nft item
-    if (op == op::mintNft) {
+    ;; constructor
+    ;; see https://temni.github.io/posts/constructor-pattern/
+    if (op == op::constructor) {
+        var ds = get_data().begin_parse();
+        slice owner = ds~load_msg_addr();
+        ds.end_parse();
+        throw_unless(error::wrong_sender, equal_slices_bits(owner, sender_address));
+        set_data(begin_cell()
+            .store_uint(0, 64)
+            .store_ref(in_msg_body~load_ref())
+            .store_slice(in_msg_body~load_msg_addr())
+            .end_cell()); ;; contract_b address is expected
+        in_msg_body.end_parse();
+        return ();
+    }
+
+    load_data(); ;; here we populate the storage variables
+
+    ;; deploy a new contract_c item
+    if (op == op::mintContractC) {
         cell state_init = calculate_item_state_init(next_index);
-        slice nft_address = calculate_item_address(state_init);
+        slice element_address = calculate_item_address(state_init);
         increase_counter();
         var msg = begin_cell()
             .store_uint(0x18, 6)
-            .store_slice(nft_address)
-            .store_coins()
+            .store_slice(element_address)
+            .store_coins(5000000)
             .store_uint(4 + 2 + 1, 1 + 4 + 4 + 64 + 32 + 1 + 1 + 1)
             .store_ref(state_init)
+            .store_ref(begin_cell().end_cell())
             .end_cell();
         send_raw_message(msg, 1); ;; pay transfer fees separately
         return ();
     }
 
     if (op == op::conveyToC) {
-        conveyToC(sender_address, in_msg_body, query_id);
+        cell body_cell = in_msg_body~load_ref();
+        conveyToC(sender_address, body_cell.begin_parse(), query_id);
         return ();
     }
 
     if (op == op::conveyToA) {
-        conveyToA(sender_address, in_msg_body, query_id);
+        cell body_cell = in_msg_body~load_ref();
+        conveyToA(sender_address, body_cell.begin_parse(), query_id);
         return ();
     }
 
     throw(0xffff); ;; if the message contains an op that is not known to this contract, we throw
+}
+
+;; GET method
+slice get_item_address_by_index(int index) method_id {
+    load_data();
+    return calculate_item_address(calculate_item_state_init(index));
 }

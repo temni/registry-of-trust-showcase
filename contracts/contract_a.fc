@@ -2,13 +2,11 @@
 #include "imports/constants.fc";
 
 ;; storage variables
-global slice owner;
 global slice contract_b_address;
 
 ;; load_data populates storage variables using stored data
 () load_data() impure inline {
     var ds = get_data().begin_parse();
-    owner = ds~load_msg_addr();
     contract_b_address = ds~load_msg_addr();
     ds.end_parse();
 }
@@ -26,16 +24,28 @@ global slice contract_b_address;
     }
     slice sender_address = cs~load_msg_addr();
 
-    load_data(); ;; here we populate the storage variables
-
     int op = in_msg_body~load_uint(32);
     int query_id = in_msg_body~load_uint(64);
 
-    ;; this operation needs to mutate an nft with an index
+    ;; constructor
+    ;; see https://temni.github.io/posts/constructor-pattern/
+    if (op == op::constructor) {
+        var ds = get_data().begin_parse();
+        slice owner = ds~load_msg_addr();
+        ds.end_parse();
+        throw_unless(error::wrong_sender, equal_slices_bits(owner, sender_address));
+        set_data(begin_cell().store_slice(in_msg_body~load_msg_addr()).end_cell()); ;; contract_b address is expected
+        in_msg_body.end_parse();
+        return ();
+    }
+
+    load_data(); ;; here we populate the storage variables
+
+    ;; this operation needs to mutate an element with an index
     if (op == op::mutate) {
         ;; parse incoming data
         var (callback_op, index, data) = (in_msg_body~load_uint(32),
-            in_msg_body~load_uint(64), in_msg_body.load_ref());
+            in_msg_body~load_uint(64), in_msg_body~load_ref());
 
         ;; message to be received by contract C
         var msg_dst = begin_cell()
@@ -47,7 +57,7 @@ global slice contract_b_address;
         ;; message to be parsed by contract_b
         var msg_wrapped = begin_cell()
                 .store_uint(index, 64)
-                .store_uint(op::changeCounter)
+                .store_uint(op::changeCounter, 32)
                 .store_ref(msg_dst)
                 .end_cell();
 
@@ -90,8 +100,9 @@ global slice contract_b_address;
     }
 
     if (op == op::onMutateCompleted) {
-        var (callback_op, q_id, sender, result) = (in_msg_body~load_uint(32),
-            in_msg_body~load_uint(64), in_msg_body~load_msg_addr(), in_msg_body.load_ref());
+        cell body = in_msg_body~load_ref();
+        slice body_sl = body.begin_parse();
+        var (callback_op, sender, result) = (body_sl~load_uint(32), body_sl~load_msg_addr(), body_sl~load_ref());
         send_raw_message(begin_cell()
             .store_uint(0x18, 6)
             .store_slice(sender)
@@ -100,7 +111,7 @@ global slice contract_b_address;
             .store_uint(1, 1)
             .store_ref(begin_cell()
                 .store_uint(callback_op, 32)   ;; op
-                .store_uint(q_id, 64)
+                .store_uint(query_id, 64)
                 .store_ref(result)
                 .end_cell())
             .end_cell(),

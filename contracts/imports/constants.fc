@@ -1,10 +1,13 @@
+;; Common
+const op::constructor = "op::constructor"c; ;; 0xfe6cc865
+
 ;; Contract A
-const op::mutate = "op::mutate"c;
+const op::mutate = "op::mutate"c; ;; 0x75408d35
 const op::refund = "op::refund"c;
 const op::onMutateCompleted = "op::onMutateCompleted"c;
 
 ;; Contract B
-const op::mintNft = "op::mintNft"c;
+const op::mintContractC = "op::mintContractC"c; ;; 0x3bf21f20
 const op::conveyToC = "op::conveyToC"c;
 const op::conveyToA = "op::conveyToA"c;
 
@@ -12,8 +15,8 @@ const op::conveyToA = "op::conveyToA"c;
 const op::changeCounter = "op::changeCounter"c;
 
 ;; Errors
-const error::wrong_sender = "error:wrong_sender"c;
-const error::wrong_item_index = "error::wrong_item_index"c;
+const error::wrong_sender = 401;
+const error::wrong_item_index = 402;
 
 ;; workchain
 const workchain = 0;

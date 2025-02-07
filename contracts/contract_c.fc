@@ -3,7 +3,7 @@
 
 ;; storage variables
 global int index;
-global cell contract_b_address;
+global slice contract_b_address;
 global int counter;
 
 ;; load_data populates storage variables using stored data
@@ -20,11 +20,9 @@ global int counter;
     set_data(begin_cell()
         .store_uint(index, 64)
         .store_slice(contract_b_address)
-        .store_uint(counter)
+        .store_uint(counter, 32)
         .end_cell());
 }
-
-int equal_slice_bits (slice a, slice b) asm "SDEQ";
 
 ;; recv_internal is the main function of the contract and is called when it receives a message from other contracts
 () recv_internal(cell in_msg_full, slice in_msg_body) impure {
@@ -44,10 +42,10 @@ int equal_slice_bits (slice a, slice b) asm "SDEQ";
     int op = in_msg_body~load_uint(32);
     int query_id = in_msg_body~load_uint(64);
 
-    ;; deploy nft item
+    ;; mutate this entity
     if (op == op::changeCounter) {
         ;; only interract with a contract B
-        throw_unless(error::wrong_sender, equal_slice_bits(sender_address, contract_b_address));
+        throw_unless(error::wrong_sender, equal_slices_bits(sender_address, contract_b_address));
         cell data = in_msg_body~load_ref();
         slice ds = data.begin_parse();
         var (callback_op, sa, in_data) = (ds~load_uint(32), ds~load_msg_addr(), ds~load_ref());
@@ -64,7 +62,7 @@ int equal_slice_bits (slice a, slice b) asm "SDEQ";
         ;; message to be parsed by contract_b
         var msg_wrapped = begin_cell()
             .store_uint(index, 64)
-            .store_uint(op::onMutateCompleted)
+            .store_uint(op::onMutateCompleted, 32)
             .store_ref(msg_dst)
             .end_cell();
 
@@ -89,4 +87,12 @@ int equal_slice_bits (slice a, slice b) asm "SDEQ";
     }
 
     throw(0xffff); ;; if the message contains an op that is not known to this contract, we throw
+}
+
+;;
+;;  GET Methods
+;;
+int get_counter() method_id {
+    load_data();
+    return counter;
 }

@@ -1,81 +1,92 @@
 import { Blockchain, SandboxContract, TreasuryContract } from '@ton/sandbox';
-import { Cell, toNano } from '@ton/core';
-import { ContractA } from '../wrappers/ContractA';
+import {beginCell, Cell, fromNano, toNano} from '@ton/core';
+import {ContractA} from '../wrappers/ContractA';
 import '@ton/test-utils';
 import { compile } from '@ton/blueprint';
+import {ContractB} from "../wrappers/ContractB";
+import {ContractC} from "../wrappers/ContractC";
 
-describe('ContractA', () => {
-    let code: Cell;
+describe('Primary workflow test', () => {
+    let codeA: Cell;
+    let codeB: Cell;
+    let codeC: Cell;
 
     beforeAll(async () => {
-        code = await compile('ContractA');
+        codeA = await compile('ContractA');
+        codeB = await compile('ContractB');
+        codeC = await compile('ContractC');
     });
 
     let blockchain: Blockchain;
     let deployer: SandboxContract<TreasuryContract>;
     let contractA: SandboxContract<ContractA>;
+    let contractB: SandboxContract<ContractB>;
 
     beforeEach(async () => {
         blockchain = await Blockchain.create();
-
-        contractA = blockchain.openContract(
-            ContractA.createFromConfig(
-                {
-                    id: 0,
-                    counter: 0,
-                },
-                code
-            )
-        );
-
         deployer = await blockchain.treasury('deployer');
+        contractA = blockchain.openContract(ContractA.createFromConfig(deployer.address, codeA));
+        contractB = blockchain.openContract(ContractB.createFromConfig(deployer.address, codeB));
 
-        const deployResult = await contractA.sendDeploy(deployer.getSender(), toNano('0.05'));
-
-        expect(deployResult.transactions).toHaveTransaction({
+        const deployResultA = await contractA.sendDeploy(deployer.getSender(), contractB.address);
+        expect(deployResultA.transactions).toHaveTransaction({
             from: deployer.address,
             to: contractA.address,
             deploy: true,
             success: true,
         });
+
+        const deployResultB = await contractB.sendDeploy(deployer.getSender(), contractA.address, codeC);
+        expect(deployResultB.transactions).toHaveTransaction({
+            from: deployer.address,
+            to: contractB.address,
+            deploy: true,
+            success: true,
+        });
     });
 
-    it('should deploy', async () => {
-        // the check is done inside beforeEach
-        // blockchain and contractA are ready to use
-    });
+    it('Should mint a new contract_c and mutate it successfully', async () => {
+        const mintResult = await contractB.sendMintNft(deployer.getSender());
+        expect(mintResult.transactions).toHaveTransaction({
+            from: deployer.address,
+            to: contractB.address,
+            success: true
+        });
 
-    it('should increase counter', async () => {
-        const increaseTimes = 3;
-        for (let i = 0; i < increaseTimes; i++) {
-            console.log(`increase ${i + 1}/${increaseTimes}`);
+        const nftIndex = 0n;
 
-            const increaser = await blockchain.treasury('increaser' + i);
+        const contractC = blockchain.openContract(ContractC.createFromAddress(await contractB.getNftAddressByIndex(nftIndex)));
+        let counterValue = await contractC.getCounterValue();
+        expect(counterValue).toEqual(0n);
 
-            const counterBefore = await contractA.getCounter();
+        const balanceStart = await deployer.getBalance();
+        // mutate the first NFT and increase it's counter by 30
+        const mutateResult = await contractA.sendMutate(deployer.getSender(), 1150, nftIndex, beginCell().storeUint(1997, 32).endCell());
+        // check first transaction is ok
+        expect(mutateResult.transactions).toHaveTransaction({
+            from: deployer.address,
+            to: contractA.address,
+            success: true
+        });
+        // check the last one is ok
+        expect(mutateResult.transactions).toHaveTransaction({
+            from: contractA.address,
+            to: deployer.address,
+            success: true,
+            op: 1150
+        });
+        console.log(`Grams spent on transaction: ${fromNano(balanceStart - (await deployer.getBalance()))} TON`)
 
-            console.log('counter before increasing', counterBefore);
+        // check counter has now this value
+        counterValue = await contractC.getCounterValue();
+        expect(counterValue).toEqual(1997n);
 
-            const increaseBy = Math.floor(Math.random() * 100);
+        // add 3 more
+        await contractA.sendMutate(deployer.getSender(), 1150, nftIndex, beginCell().storeUint(4, 32).endCell());
 
-            console.log('increasing by', increaseBy);
+        // check counter has now this value
+        counterValue = await contractC.getCounterValue();
+        expect(counterValue).toEqual(2001n);
 
-            const increaseResult = await contractA.sendIncrease(increaser.getSender(), {
-                increaseBy,
-                value: toNano('0.05'),
-            });
-
-            expect(increaseResult.transactions).toHaveTransaction({
-                from: increaser.address,
-                to: contractA.address,
-                success: true,
-            });
-
-            const counterAfter = await contractA.getCounter();
-
-            console.log('counter after increasing', counterAfter);
-
-            expect(counterAfter).toBe(counterBefore + increaseBy);
-        }
     });
 });
