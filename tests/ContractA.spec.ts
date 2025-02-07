@@ -75,7 +75,7 @@ describe('Primary workflow test', () => {
             success: true,
             op: 1150
         });
-        console.log(`Grams spent on transaction: ${fromNano(balanceStart - (await deployer.getBalance()))} TON`)
+        console.log(`Grams spent on transaction: ${fromNano(balanceStart - (await deployer.getBalance()))} TON b`)
 
         // check counter has now this value
         counterValue = await contractC.getCounterValue();
@@ -88,5 +88,27 @@ describe('Primary workflow test', () => {
         counterValue = await contractC.getCounterValue();
         expect(counterValue).toEqual(2001n);
 
+        // now do the same but with a direct call
+        const balanceStartDirect = await deployer.getBalance();
+        // mutate the first NFT and increase it's counter by 30
+        const mutateResultDirect = await contractA.sendMutateDirect(deployer.getSender(), 1151, contractC.address, beginCell().storeUint(307, 32).endCell());
+        // check first transaction is ok
+        expect(mutateResultDirect.transactions).toHaveTransaction({
+            from: deployer.address,
+            to: contractA.address,
+            success: true
+        });
+        // check the last one is ok
+        expect(mutateResultDirect.transactions).toHaveTransaction({
+            from: contractA.address,
+            to: deployer.address,
+            success: true,
+            op: 1151
+        });
+        console.log(`Grams spent on transaction: ${fromNano(balanceStartDirect - (await deployer.getBalance()))} TON b`);
+
+        // check counter has now this value
+        counterValue = await contractC.getCounterValue();
+        expect(counterValue).toEqual(2308n);
     });
 });

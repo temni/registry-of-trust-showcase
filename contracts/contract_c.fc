@@ -86,6 +86,33 @@ global int counter;
         return ();
     }
 
+    if (op == op::changeCounterDirect) {
+        var (callback_op, sa, data) = (in_msg_body~load_uint(32), in_msg_body~load_msg_addr(), in_msg_body~load_ref());
+        slice in_data_ds = data.begin_parse();
+        increase_counter(in_data_ds~load_uint(32)); ;; expect value our counter to be incremented by
+
+        send_raw_message(begin_cell()
+            .store_uint(0x18, 6)
+            .store_slice(sender_address)
+            .store_coins(0)
+            .store_uint(0, 106)
+            .store_uint(1, 1)
+            .store_ref(begin_cell()
+                .store_uint(op::onMutateCompleted, 32)
+                .store_uint(query_id, 64)
+                .store_ref(begin_cell()
+                    .store_uint(callback_op, 32)
+                    .store_slice(sa)
+                    .store_ref(begin_cell()
+                        .store_uint(counter, 32)
+                        .end_cell())
+                    .end_cell())
+                .end_cell())
+            .end_cell(),
+            64);
+        return();
+    }
+
     throw(0xffff); ;; if the message contains an op that is not known to this contract, we throw
 }
 

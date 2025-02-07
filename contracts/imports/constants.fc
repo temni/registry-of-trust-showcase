@@ -3,6 +3,7 @@ const op::constructor = "op::constructor"c; ;; 0xfe6cc865
 
 ;; Contract A
 const op::mutate = "op::mutate"c; ;; 0x75408d35
+const op::mutateDirect = "op::mutateDirect"c; ;; 0xf35400c3
 const op::refund = "op::refund"c;
 const op::onMutateCompleted = "op::onMutateCompleted"c;
 
@@ -13,6 +14,7 @@ const op::conveyToA = "op::conveyToA"c;
 
 ;; Contract C
 const op::changeCounter = "op::changeCounter"c;
+const op::changeCounterDirect = "op::changeCounterDirect"c;
 
 ;; Errors
 const error::wrong_sender = 401;

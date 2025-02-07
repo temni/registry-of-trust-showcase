@@ -81,6 +81,29 @@ global slice contract_b_address;
         return ();
     }
 
+    ;; this is an example if interraction w/o collection contract
+    if (op == op::mutateDirect) {
+        var (callback_op, itemDirectAddress, data) = (in_msg_body~load_uint(32),
+            in_msg_body~load_msg_addr(), in_msg_body~load_ref());
+
+        send_raw_message(begin_cell()
+            .store_uint(0x18, 6)
+            .store_slice(itemDirectAddress)
+            .store_coins(0)
+            .store_uint(0, 106)
+            .store_uint(1, 1)
+            .store_ref(begin_cell()
+                .store_uint(op::changeCounterDirect, 32)
+                .store_uint(query_id, 64)
+                .store_uint(callback_op, 32)
+                .store_slice(sender_address)
+                .store_ref(data)
+                .end_cell())
+            .end_cell(),
+            64);
+        return ();
+    }
+
     if (op == op::refund) {
         var (callback_op, q_id, sender) = (in_msg_body~load_uint(32),
             in_msg_body~load_uint(64), in_msg_body~load_msg_addr());

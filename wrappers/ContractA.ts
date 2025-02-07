@@ -17,6 +17,7 @@ import {
   ---------------------------
 */
 export const OP_MUTATE = 0x75408d35;
+export const OP_MUTATE_DIRECT = 0xf35400c3;
 export const OP_CONSTRUCTOR = 0xfe6cc865;
 
 export class ContractA implements Contract {
@@ -52,7 +53,7 @@ export class ContractA implements Contract {
      * @param provider - ContractProvider used to send the message.
      * @param via - The sender of the message.
      * @param callbackOp - The callback op code (to be forwarded to Contract C).
-     * @param index - The NFT item index (passed in the message).
+     * @param index - The item index (passed in the message).
      * @param data - A cell containing additional data.
      * @param query_id - Query identifier.
      * @param value - Coins to attach.
@@ -76,7 +77,7 @@ export class ContractA implements Contract {
         // Build the overall message body:
         //   [op (32 bits), query_id (64 bits), ref(deployParamsCell)]
         const body = beginCell()
-            .storeUint(OP_MUTATE, 32)      // e.g. op::deployNft() in your contract
+            .storeUint(OP_MUTATE, 32)
             .storeUint(queryId, 64)     // uint64
             .storeBuilder(mutateCell)            // the parameters cell
             .endCell();
@@ -87,6 +88,41 @@ export class ContractA implements Contract {
             sendMode: SendMode.PAY_GAS_SEPARATELY,
             body,
         });
+    }
 
+    /**
+     * Sends a mutate message.
+     * @param provider - ContractProvider used to send the message.
+     * @param via - The sender of the message.
+     * @param callbackOp - The callback op code (to be forwarded to Contract C).
+     * @param addressItem - The item index (passed in the message).
+     * @param data - A cell containing additional data.
+     * @param query_id - Query identifier.
+     * @param value - Coins to attach.
+     */
+    async sendMutateDirect(
+        provider: ContractProvider,
+        via: Sender,
+        callbackOp: number,
+        addressItem: Address,
+        data: Cell,
+        query_id?: bigint,
+        value?: bigint
+    ): Promise<void> {
+        const queryId = query_id ?? BigInt(Date.now());
+        const body = beginCell()
+            .storeUint(OP_MUTATE_DIRECT, 32)
+            .storeUint(queryId, 64)     // uint64
+            .storeUint(callbackOp, 32)
+            .storeAddress(addressItem)
+            .storeRef(data)
+            .endCell();
+
+        // Send the internal message with enough TON for storage + fees
+        await provider.internal(via, {
+            value: value ?? toNano("0.5"),
+            sendMode: SendMode.PAY_GAS_SEPARATELY,
+            body,
+        });
     }
 }
