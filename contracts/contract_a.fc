@@ -123,6 +123,8 @@ global slice contract_b_address;
     }
 
     if (op == op::onMutateCompleted) {
+        ;; it must be checked here but for direct implementation it's not working
+        ;; throw_unless(error::wrong_sender, equal_slices_bits(sender_address, contract_b_address));
         cell body = in_msg_body~load_ref();
         slice body_sl = body.begin_parse();
         var (callback_op, sender, result) = (body_sl~load_uint(32), body_sl~load_msg_addr(), body_sl~load_ref());
