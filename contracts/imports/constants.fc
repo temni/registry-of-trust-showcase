@@ -1,0 +1,19 @@
+;; Contract A
+const op::mutate = "op::mutate"c;
+const op::refund = "op::refund"c;
+const op::onMutateCompleted = "op::onMutateCompleted"c;
+
+;; Contract B
+const op::mintNft = "op::mintNft"c;
+const op::conveyToC = "op::conveyToC"c;
+const op::conveyToA = "op::conveyToA"c;
+
+;; Contract C
+const op::changeCounter = "op::changeCounter"c;
+
+;; Errors
+const error::wrong_sender = "error:wrong_sender"c;
+const error::wrong_item_index = "error::wrong_item_index"c;
+
+;; workchain
+const workchain = 0;

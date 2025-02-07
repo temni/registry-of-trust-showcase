@@ -1,0 +1,92 @@
+#include "imports/stdlib.fc";
+#include "imports/constants.fc";
+
+;; storage variables
+global int index;
+global cell contract_b_address;
+global int counter;
+
+;; load_data populates storage variables using stored data
+() load_data() impure inline {
+    var ds = get_data().begin_parse();
+    index = ds~load_uint(64);
+    contract_b_address = ds~load_msg_addr();
+    counter = ds~load_uint(32);
+    ds.end_parse();
+}
+
+() increase_counter(int value) impure inline {
+    counter = counter + value;
+    set_data(begin_cell()
+        .store_uint(index, 64)
+        .store_slice(contract_b_address)
+        .store_uint(counter)
+        .end_cell());
+}
+
+int equal_slice_bits (slice a, slice b) asm "SDEQ";
+
+;; recv_internal is the main function of the contract and is called when it receives a message from other contracts
+() recv_internal(cell in_msg_full, slice in_msg_body) impure {
+    if (in_msg_body.slice_empty?()) { ;; ignore all empty messages
+        return ();
+    }
+
+    slice cs = in_msg_full.begin_parse();
+    int flags = cs~load_uint(4);
+    if (flags & 1) { ;; ignore all bounced messages
+        return ();
+    }
+    slice sender_address = cs~load_msg_addr();
+
+    load_data(); ;; here we populate the storage variables
+
+    int op = in_msg_body~load_uint(32);
+    int query_id = in_msg_body~load_uint(64);
+
+    ;; deploy nft item
+    if (op == op::changeCounter) {
+        ;; only interract with a contract B
+        throw_unless(error::wrong_sender, equal_slice_bits(sender_address, contract_b_address));
+        cell data = in_msg_body~load_ref();
+        slice ds = data.begin_parse();
+        var (callback_op, sa, in_data) = (ds~load_uint(32), ds~load_msg_addr(), ds~load_ref());
+        slice in_data_ds = in_data.begin_parse(); ;; parse our specific data
+        increase_counter(in_data_ds~load_uint(32)); ;; expect value our counter to be incremented by
+
+        ;; message to be received by contract A
+        var msg_dst = begin_cell()
+            .store_uint(callback_op, 32)
+            .store_slice(sa)
+            .store_ref(begin_cell().store_uint(counter, 32).end_cell()) ;; send the updated counter back
+            .end_cell();
+
+        ;; message to be parsed by contract_b
+        var msg_wrapped = begin_cell()
+            .store_uint(index, 64)
+            .store_uint(op::onMutateCompleted)
+            .store_ref(msg_dst)
+            .end_cell();
+
+        ;; raw message of ton blockchain
+        var msg = begin_cell()
+            .store_uint(0x18, 6)
+            .store_slice(contract_b_address)
+            .store_coins(0)
+            .store_uint(0, 106)
+            .store_uint(1, 1)
+            .store_ref(begin_cell()
+                .store_uint(op::conveyToA, 32)
+                .store_uint(query_id, 64)
+                .store_ref(msg_wrapped)
+                .end_cell()
+            )
+            .end_cell();
+
+        ;; send the raw message to the blockchain
+        send_raw_message(msg, 64);
+        return ();
+    }
+
+    throw(0xffff); ;; if the message contains an op that is not known to this contract, we throw
+}

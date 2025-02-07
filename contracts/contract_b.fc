@@ -1,0 +1,147 @@
+#include "imports/stdlib.fc";
+#include "imports/constants.fc";
+
+;; storage variables
+global int next_index;
+global cell contract_c_code;
+global slice contract_a_address;
+
+;; load_data populates storage variables using stored data
+() load_data() impure inline {
+    var ds = get_data().begin_parse();
+    next_index = ds~load_uint(64);
+    contract_a_address = ds~load_msg_addr();
+    contract_c_code = ds~load_ref();
+    ds.end_parse();
+}
+
+() increase_counter() impure inline {
+    set_data(begin_cell()
+        .store_uint(next_index + 1, 64)
+        .store_slice(contract_a_address)
+        .store_ref(contract_c_code)
+        .end_cell());
+}
+
+int equal_slice_bits (slice a, slice b) asm "SDEQ";
+
+cell calculate_item_state_init(int item_index) {
+    cell data = begin_cell()
+        .store_uint(item_index, 64)
+        .store_slice(my_address()) ;; address of this contract
+        .store_uint(0, 32) ;; counter
+        .end_cell();
+    return begin_cell()
+        .store_uint(0, 2)
+        .store_dict(contract_c_code)
+        .store_dict(data)
+        .store_uint(0, 1)
+        .end_cell();
+}
+
+slice calculate_item_address(cell state_init) {
+    return begin_cell().store_uint(4, 3)
+        .store_int(workchain, 8)
+        .store_uint(cell_hash(state_init), 256)
+        .end_cell()
+        .begin_parse();
+}
+
+;; Forwards any message received from an item contract to the main contract with security checks
+() conveyToA(slice sender_address, slice msg_body, int query_id) impure inline {
+    ;; parse the message body
+    var (index, method, data) = (msg_body~load_uint(50), msg_body~load_uint(32), msg_body~load_ref());
+    ;; Ensure the provided index is within the known range. This prevents any deployment with a higher index than expected.
+    throw_unless(error::wrong_item_index, next_index > index);
+    ;; Re-calculate the expected address for the item contract based on its index and code
+    slice item_address = calculate_item_address( calculate_item_state_init(index));
+    ;; Verify that the sender's address matches the expected item address
+    throw_unless(error::wrong_sender, equal_slice_bits(sender_address, item_address));
+    ;; Send the message to the A contract
+    send_raw_message(begin_cell()
+        .store_uint(0x18, 6)
+        .store_slice(contract_a_address)
+        .store_coins(0)
+        .store_uint(0, 1 + 4 + 4 + 64 + 32 + 1)
+        .store_uint(1, 1)             ;; body is a reference
+        .store_ref(begin_cell()
+            .store_uint(method, 32)   ;; op
+            .store_uint(query_id, 64) ;; query_id
+            .store_ref(data)          ;; body to convey
+            .end_cell())
+        .end_cell(),
+        64);
+}
+
+;; Forwards a message from the main contract to an item contract based on its index
+() conveyToC(slice sender_address, slice msg_body, int query_id) impure inline {
+    ;; parse the message body
+    var (index, method, data) = (msg_body~load_uint(50), msg_body~load_uint(32), msg_body~load_ref());
+    ;; Ensure the message originated from the main contract
+    throw_unless(error::wrong_sender, equal_slice_bits(contract_a_address, sender_address));
+    ;; Validate that the index is within the known range
+    throw_unless(error::wrong_item_index, next_index > index);
+    ;; Compute the expected address for the item contract
+    slice item_address = calculate_item_address(calculate_item_state_init(index));
+    ;; Forward the message to the item contract
+    send_raw_message(begin_cell()
+        .store_uint(0x18, 6)
+        .store_slice(item_address)
+        .store_coins(0)
+        .store_uint(0, 1 + 4 + 4 + 64 + 32 + 1)
+        .store_uint(1, 1)             ;; body is a reference
+        .store_ref(begin_cell()
+            .store_uint(method, 32)   ;; op
+            .store_uint(query_id, 64) ;; query_id
+            .store_ref(data)          ;; body to convey
+            .end_cell())
+        .end_cell(),
+        64);
+}
+
+;; recv_internal is the main function of the contract and is called when it receives a message from other contracts
+() recv_internal(cell in_msg_full, slice in_msg_body) impure {
+    if (in_msg_body.slice_empty?()) { ;; ignore all empty messages
+        return ();
+    }
+
+    slice cs = in_msg_full.begin_parse();
+    int flags = cs~load_uint(4);
+    if (flags & 1) { ;; ignore all bounced messages
+        return ();
+    }
+    slice sender_address = cs~load_msg_addr();
+
+    load_data(); ;; here we populate the storage variables
+
+    int op = in_msg_body~load_uint(32);
+    int query_id = in_msg_body~load_uint(64);
+
+    ;; deploy nft item
+    if (op == op::mintNft) {
+        cell state_init = calculate_item_state_init(next_index);
+        slice nft_address = calculate_item_address(state_init);
+        increase_counter();
+        var msg = begin_cell()
+            .store_uint(0x18, 6)
+            .store_slice(nft_address)
+            .store_coins()
+            .store_uint(4 + 2 + 1, 1 + 4 + 4 + 64 + 32 + 1 + 1 + 1)
+            .store_ref(state_init)
+            .end_cell();
+        send_raw_message(msg, 1); ;; pay transfer fees separately
+        return ();
+    }
+
+    if (op == op::conveyToC) {
+        conveyToC(sender_address, in_msg_body, query_id);
+        return ();
+    }
+
+    if (op == op::conveyToA) {
+        conveyToA(sender_address, in_msg_body, query_id);
+        return ();
+    }
+
+    throw(0xffff); ;; if the message contains an op that is not known to this contract, we throw
+}
